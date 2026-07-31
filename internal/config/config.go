@@ -11,6 +11,7 @@ import (
 type Config struct {
 	Rank  RankConfig  `toml:"rank"`
 	Graph GraphConfig `toml:"graph"`
+	LLM   LLMConfig   `toml:"llm"`
 }
 
 // RankConfig holds scoring weights.
@@ -30,6 +31,14 @@ type GraphConfig struct {
 	MaxDepth int `toml:"max_depth"`
 }
 
+// LLMConfig holds LLM provider settings.
+type LLMConfig struct {
+	Provider string `toml:"provider"`
+	Model    string `toml:"model"`
+	APIKey   string `toml:"api_key"`
+	BaseURL  string `toml:"base_url"`
+}
+
 // Default returns the built-in default configuration.
 func Default() *Config {
 	return &Config{
@@ -45,6 +54,10 @@ func Default() *Config {
 		},
 		Graph: GraphConfig{
 			MaxDepth: 5,
+		},
+		LLM: LLMConfig{
+			Provider: "openai",
+			Model:    "gpt-4o-mini",
 		},
 	}
 }

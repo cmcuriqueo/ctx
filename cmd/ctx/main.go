@@ -13,6 +13,8 @@ import (
 	"github.com/matias/ctx/internal/config"
 	"github.com/matias/ctx/internal/graph"
 	"github.com/matias/ctx/internal/ignore"
+	"github.com/matias/ctx/internal/llm"
+	"github.com/matias/ctx/internal/llm/types"
 	"github.com/matias/ctx/internal/rank"
 	"github.com/matias/ctx/internal/scanner"
 	"github.com/matias/ctx/internal/tokens"
@@ -20,11 +22,15 @@ import (
 )
 
 var (
-	budget   int
-	output   string
-	cacheDir string
-	depth    int
-	format   string
+	budget    int
+	output    string
+	cacheDir  string
+	depth     int
+	format    string
+	provider  string
+	model     string
+	apiKey    string
+	offline   bool
 )
 
 func main() {
@@ -42,6 +48,7 @@ func main() {
 	rootCmd.AddCommand(tokensCmd())
 	rootCmd.AddCommand(bundleCmd())
 	rootCmd.AddCommand(graphCmd())
+	rootCmd.AddCommand(taskCmd())
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -73,6 +80,35 @@ func scanManifest(path string) (*models.Manifest, *graph.Graph, *config.Config, 
 	resolver := graph.NewSimpleResolver(manifest)
 	g := graph.New(manifest, resolver)
 	return manifest, g, cfg, nil
+}
+
+func buildSummary(manifest *models.Manifest, task string, estimator tokens.Estimator) *types.ProjectSummary {
+	summary := &types.ProjectSummary{
+		Root: manifest.Root,
+		Task: task,
+	}
+	for _, f := range manifest.Files {
+		if f.IsBinary {
+			continue
+		}
+		content, err := os.ReadFile(filepath.Join(manifest.Root, f.Path))
+		if err != nil {
+			continue
+		}
+		tok := estimator.Estimate(string(content))
+		summary.TotalTokens += tok
+		summary.Files = append(summary.Files, types.FileSummary{
+			Path:     f.Path,
+			Language: f.Language,
+			Lines:    f.Lines,
+			Tokens:   tok,
+			Package:  f.Package,
+			Imports:  f.Imports,
+			Exports:  f.Exports,
+		})
+	}
+	summary.TotalFiles = len(summary.Files)
+	return summary
 }
 
 func scanCmd() *cobra.Command {
@@ -200,4 +236,71 @@ func graphCmd() *cobra.Command {
 	cmd.Flags().StringVar(&format, "format", "text", "Output format: text, dot, json")
 	_ = depth
 	return cmd
+}
+
+func taskCmd() *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "task <description> [path]",
+		Short: "Use an LLM to select files for a task",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			task := args[0]
+			path := "."
+			if len(args) > 1 {
+				path = args[1]
+			}
+
+			manifest, g, cfg, err := scanManifest(path)
+			if err != nil {
+				return err
+			}
+
+			est := tokens.NewHeuristicEstimator()
+			scorer := rank.NewScorer(cfg)
+			b := builder.New(est, scorer, g, cfg)
+
+			if offline {
+				fmt.Println("Offline mode: using heuristics")
+				return b.Build(manifest, budget, output)
+			}
+
+			opts := types.Options{
+				Provider: firstNonEmpty(provider, cfg.LLM.Provider),
+				Model:    firstNonEmpty(model, cfg.LLM.Model),
+				APIKey:   firstNonEmpty(apiKey, cfg.LLM.APIKey),
+				BaseURL:  cfg.LLM.BaseURL,
+			}
+			providerImpl, err := llm.New(opts)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "LLM provider error: %v\nFalling back to heuristics.\n", err)
+				return b.Build(manifest, budget, output)
+			}
+
+			summary := buildSummary(manifest, task, est)
+			fmt.Printf("Asking %s (%s) with %d files, ~%d tokens...\n", providerImpl.Name(), firstNonEmpty(opts.Model, "default"), summary.TotalFiles, summary.TotalTokens)
+
+			selection, err := providerImpl.SelectFiles(task, summary)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "LLM request failed: %v\nFalling back to heuristics.\n", err)
+				return b.Build(manifest, budget, output)
+			}
+
+			fmt.Printf("Explanation: %s\nSelected %d files\n", selection.Explanation, len(selection.Paths))
+			return b.BuildFromSelection(manifest, selection, budget, output)
+		},
+	}
+	cmd.Flags().StringVar(&provider, "provider", "", "LLM provider (openai, anthropic)")
+	cmd.Flags().StringVar(&model, "model", "", "Model name")
+	cmd.Flags().StringVar(&apiKey, "api-key", "", "API key")
+	cmd.Flags().BoolVar(&offline, "offline", false, "Use offline heuristics instead of LLM")
+	return cmd
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if v != "" {
+			return v
+		}
+	}
+	return ""
 }

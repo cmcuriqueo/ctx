@@ -9,6 +9,7 @@ import (
 
 	"github.com/matias/ctx/internal/config"
 	"github.com/matias/ctx/internal/graph"
+	"github.com/matias/ctx/internal/llm/types"
 	"github.com/matias/ctx/internal/rank"
 	"github.com/matias/ctx/internal/tokens"
 	"github.com/matias/ctx/pkg/models"
@@ -71,8 +72,53 @@ func (b *Builder) Build(manifest *models.Manifest, budget int, output string) er
 		used += rf.Tokens
 	}
 
+	return b.writeContext(manifest, selected, used, budget, output, "")
+}
+
+// BuildFromSelection generates context.md from an LLM selection.
+func (b *Builder) BuildFromSelection(manifest *models.Manifest, selection *types.Selection, budget int, output string) error {
+	selectedSet := make(map[string]struct{}, len(selection.Paths))
+	for _, p := range selection.Paths {
+		selectedSet[p] = struct{}{}
+	}
+
+	var selected []models.RankedFile
+	used := 0
+	for _, f := range manifest.Files {
+		if _, ok := selectedSet[f.Path]; !ok {
+			continue
+		}
+		if f.IsBinary {
+			continue
+		}
+		fullPath := filepath.Join(manifest.Root, f.Path)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		tok := b.estimator.Estimate(string(content))
+		if used+tok > budget {
+			continue
+		}
+		selected = append(selected, models.RankedFile{
+			FileInfo: f,
+			Score:    b.scorer.Score(f, b.graph),
+			Tokens:   tok,
+		})
+		used += tok
+	}
+
+	return b.writeContext(manifest, selected, used, budget, output, selection.Explanation)
+}
+
+func (b *Builder) writeContext(manifest *models.Manifest, selected []models.RankedFile, used, budget int, output, explanation string) error {
 	var sb strings.Builder
 	sb.WriteString("# Context\n\n")
+	if explanation != "" {
+		sb.WriteString("## AI reasoning\n\n")
+		sb.WriteString(explanation)
+		sb.WriteString("\n\n")
+	}
 	sb.WriteString(fmt.Sprintf("Project root: `%s`\n\n", manifest.Root))
 	sb.WriteString(fmt.Sprintf("Files scanned: %d\n\n", len(manifest.Files)))
 	sb.WriteString(fmt.Sprintf("Budget: %d tokens\n\n", budget))

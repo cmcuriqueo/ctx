@@ -2,7 +2,7 @@
 
 ## Project
 
-- **Language**: Go 1.23+
+- **Language**: Go 1.24+
 - **CLI framework**: [cobra](https://github.com/spf13/cobra)
 - **Module**: `github.com/matias/ctx`
 - **Entry point**: `cmd/ctx/main.go`
@@ -16,6 +16,10 @@
   - `internal/config` — `ctx.toml` loading
   - `internal/builder` — context.md generation
   - `internal/cache` — JSON persistence
+  - `internal/openai` — OpenAI LLM provider
+  - `internal/anthropic` — Anthropic LLM provider
+  - `internal/llm` — provider factory
+  - `internal/llm/types` — shared LLM interfaces and types
   - `pkg/models` — shared types
 
 ## Build & Test
@@ -42,3 +46,4 @@ go test ./...
 - Return errors; do not log inside packages unless necessary.
 - Keep CLI flags in `main.go`.
 - Tree-sitter queries live next to each parser (`go.go`, `javascript.go`, etc.).
+- LLM providers implement `types.Provider` from `internal/llm/types`.
