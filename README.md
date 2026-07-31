@@ -1,12 +1,23 @@
 # ctx
 
-`ctx` is a context builder CLI for AI. It scans a codebase, ranks files by relevance, respects a token budget, and generates a ready-to-paste `context.md`.
+`ctx` is a context builder CLI for AI. It scans a codebase, builds a dependency graph, ranks files by relevance, respects a token budget, and generates a ready-to-paste `context.md`.
 
-> This is the MVP. Advanced features (parser, dependency graph, AI-assisted ranking) are planned for future versions.
+## Features
+
+- **Multi-language parsing** with Tree-sitter (Go, TypeScript, JavaScript, Python).
+- **Dependency graph** to discover related files without sending code to an API.
+- **Configurable ranking** via `ctx.toml`.
+- **Offline token estimation** heuristic.
+- **Ignore engine** combining `.gitignore`, `.ctxignore`, and built-in rules.
+
+## Requirements
+
+- Go 1.23 or later.
+- A C compiler for Tree-sitter (CGO):
+  - **Windows**: MinGW-w64 (the repo includes a portable copy under `.tools/mingw64`).
+  - **Linux/macOS**: `gcc` or `clang`.
 
 ## Install
-
-Requires Go 1.23 or later.
 
 ### Automatic install
 
@@ -16,27 +27,36 @@ Requires Go 1.23 or later.
 .\scripts\install-windows.ps1
 ```
 
+> The script downloads a portable MinGW compiler into `.tools/mingw64` if `gcc` is not found.
+
 **Linux / macOS** (Bash):
 
 ```bash
 bash scripts/install-linux.sh
 ```
 
-These scripts compile `ctx`, copy it to a user directory (`C:\Users\<you>\tools` on Windows, `~/.local/bin` on Linux/macOS), and add that directory to your `PATH`.
-
 ### Manual install
 
 ```bash
-go build -o ctx ./cmd/ctx
-```
+# Windows with bundled MinGW
+$env:CC="C:\Users\<you>\ctx\.tools\mingw64\bin\gcc.exe"
+$env:CXX="C:\Users\<you>\ctx\.tools\mingw64\bin\g++.exe"
+go build -o ctx.exe ./cmd/ctx
 
-Then copy the binary to a directory that is already in your `PATH`.
+# Linux / macOS
+CGO_ENABLED=1 go build -o ctx ./cmd/ctx
+```
 
 ## Usage
 
 ```bash
-# Scan current directory and cache manifest
+# Scan current directory (extracts imports/exports and builds graph)
 ctx scan
+
+# Show dependency graph
+ctx graph
+ctx graph --format dot
+ctx graph --format json
 
 # Estimate tokens per file
 ctx tokens
@@ -52,34 +72,46 @@ ctx bundle -b 8000 -o docs/context.md
 
 | Command | Description |
 |---------|-------------|
-| `scan [path]` | Walk the repository and store a manifest in `.cache/ctx/manifest.json`. |
+| `scan [path]` | Walk the repository, parse imports/exports, and cache the manifest + graph. |
+| `graph [path]` | Display the dependency graph (text, dot, or json). |
 | `tokens [path]` | Estimate tokens for each scanned file using an offline heuristic. |
 | `bundle [path]` | Generate `context.md` with the most relevant files within budget. |
 
-## Options
+## Configuration
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `-b, --budget` | `4000` | Maximum tokens to include in the output. |
-| `-o, --output` | `context.md` | Path to the generated context file. |
-| `--cache-dir` | `.cache/ctx` | Directory used for cached metadata. |
+Create `ctx.toml` in the project root:
+
+```toml
+[rank]
+entrypoint = 30
+readme = 20
+config = 20
+test = 10
+generated = -40
+vendor = -30
+imported_bonus = 15
+large_isolated = -20
+
+[graph]
+max_depth = 5
+```
 
 ## How it works
 
 1. **Scanner** walks the directory tree, skipping files matched by `.gitignore`, `.ctxignore`, and built-in rules.
-2. **Ignore Engine** excludes common folders like `node_modules`, `dist`, `build`, `.git`, and binary files.
-3. **Token Estimator** uses an offline heuristic (~4 characters per token).
-4. **Ranking Engine** scores files by path heuristics: entrypoints, READMEs, configs, tests, generated code, vendor code.
-5. **Context Builder** selects files greedily by `score/tokens` until the budget is exhausted and writes `context.md`.
+2. **Parser** uses Tree-sitter to extract package/module names, imports, and exports.
+3. **Graph Builder** resolves imports to local files and builds a directed dependency graph.
+4. **Ranking Engine** scores files using configurable weights, including a bonus for files imported by many others.
+5. **Context Builder** selects entrypoints, expands via the graph, and fills the remaining budget greedily by `score/tokens`.
 
 ## Ignored by default
 
 - `node_modules`, `dist`, `build`, `coverage`, `.git`, `bin`, `target`, `.cache`
-- Binary files: `*.exe`, `*.dll`, `*.so`, `*.png`, `*.jpg`, `*.mp4`, etc.
+- `context.md`, `context*.md`
+- Binary files: `*.exe`, `*.dll`, `*.png`, `*.jpg`, `*.mp4`, etc.
 - Anything listed in `.gitignore` or `.ctxignore`
 
 ## Roadmap
 
-- **V2**: language parser, dependency graph, configurable ranking formula.
 - **V3**: task mode, optional AI-assisted selection (tree + metadata only).
 - **V4**: plugins, monorepo support, LSP integration, local embeddings.

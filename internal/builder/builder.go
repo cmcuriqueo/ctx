@@ -7,6 +7,8 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/matias/ctx/internal/config"
+	"github.com/matias/ctx/internal/graph"
 	"github.com/matias/ctx/internal/rank"
 	"github.com/matias/ctx/internal/tokens"
 	"github.com/matias/ctx/pkg/models"
@@ -16,15 +18,19 @@ import (
 type Builder struct {
 	estimator tokens.Estimator
 	scorer    *rank.Scorer
+	graph     *graph.Graph
+	cfg       *config.Config
 }
 
-// New creates a builder with the given estimator and scorer.
-func New(estimator tokens.Estimator, scorer *rank.Scorer) *Builder {
-	return &Builder{estimator: estimator, scorer: scorer}
+// New creates a builder with the given dependencies.
+func New(estimator tokens.Estimator, scorer *rank.Scorer, g *graph.Graph, cfg *config.Config) *Builder {
+	return &Builder{estimator: estimator, scorer: scorer, graph: g, cfg: cfg}
 }
 
 // Build generates the context file for the given manifest and budget.
 func (b *Builder) Build(manifest *models.Manifest, budget int, output string) error {
+	related := b.relatedFiles(manifest)
+
 	var ranked []models.RankedFile
 	for _, f := range manifest.Files {
 		if f.IsBinary {
@@ -36,7 +42,10 @@ func (b *Builder) Build(manifest *models.Manifest, budget int, output string) er
 			continue
 		}
 		tok := b.estimator.Estimate(string(content))
-		score := b.scorer.Score(f)
+		score := b.scorer.Score(f, b.graph)
+		if _, ok := related[f.Path]; ok {
+			score += 25 // neighborhood boost from entrypoints
+		}
 		ranked = append(ranked, models.RankedFile{
 			FileInfo:   f,
 			Score:      score,
@@ -88,6 +97,42 @@ func (b *Builder) Build(manifest *models.Manifest, budget int, output string) er
 		return err
 	}
 	return os.WriteFile(output, []byte(sb.String()), 0644)
+}
+
+// relatedFiles returns files reachable from entrypoints/readmes via the dependency graph.
+func (b *Builder) relatedFiles(manifest *models.Manifest) map[string]struct{} {
+	related := make(map[string]struct{})
+	if b.graph == nil {
+		return related
+	}
+
+	var seeds []string
+	for _, f := range manifest.Files {
+		name := strings.ToLower(filepath.Base(f.Path))
+		if isSeed(name) {
+			seeds = append(seeds, f.Path)
+		}
+	}
+
+	maxDepth := 5
+	if b.cfg != nil {
+		maxDepth = b.cfg.Graph.MaxDepth
+	}
+	for _, seed := range seeds {
+		for _, n := range b.graph.BFS(seed, maxDepth) {
+			related[n] = struct{}{}
+		}
+	}
+	return related
+}
+
+func isSeed(name string) bool {
+	return name == "main.go" ||
+		name == "index.js" || name == "index.mjs" || name == "index.cjs" ||
+		name == "index.ts" || name == "index.tsx" || name == "index.jsx" ||
+		name == "app.py" || name == "main.py" || name == "main.rs" || name == "main.java" ||
+		name == "app.java" || name == "program.cs" ||
+		strings.HasPrefix(name, "readme.")
 }
 
 func max(a, b int) int {

@@ -6,35 +6,39 @@
 - **CLI framework**: [cobra](https://github.com/spf13/cobra)
 - **Module**: `github.com/matias/ctx`
 - **Entry point**: `cmd/ctx/main.go`
-- **Packages**: `internal/*` for implementation, `pkg/models` for shared types.
+- **Packages**:
+  - `internal/scanner` — filesystem walk and metadata extraction
+  - `internal/ignore` — exclusion rules from defaults, `.gitignore`, `.ctxignore`
+  - `internal/parser` — Tree-sitter based import/export extraction
+  - `internal/graph` — dependency graph and algorithms
+  - `internal/tokens` — token estimation strategies
+  - `internal/rank` — file relevance scoring
+  - `internal/config` — `ctx.toml` loading
+  - `internal/builder` — context.md generation
+  - `internal/cache` — JSON persistence
+  - `pkg/models` — shared types
 
 ## Build & Test
 
-```bash
-# Build binary
-go build -o ctx ./cmd/ctx
+Tree-sitter requires CGO. On Windows use the bundled MinGW:
 
-# Run all tests
+```powershell
+$env:CC="C:\Users\matias\ctx\.tools\mingw64\bin\gcc.exe"
+$env:CXX="C:\Users\matias\ctx\.tools\mingw64\bin\g++.exe"
+go build -o ctx.exe ./cmd/ctx
 go test ./...
-
-# Run with race detector
-go test -race ./...
 ```
 
-## Architecture
+On Linux/macOS:
 
-Keep modules independent:
-
-- `scanner` — filesystem walk and metadata extraction.
-- `ignore` — exclusion rules from defaults, `.gitignore`, `.ctxignore`.
-- `tokens` — token estimation strategies.
-- `rank` — file relevance scoring.
-- `builder` — context.md generation.
-- `cache` — JSON persistence by file hash.
+```bash
+CGO_ENABLED=1 go build -o ctx ./cmd/ctx
+go test ./...
+```
 
 ## Conventions
 
 - Use `filepath.ToSlash` for stored relative paths.
 - Return errors; do not log inside packages unless necessary.
 - Keep CLI flags in `main.go`.
-- Avoid adding heavy dependencies in the MVP.
+- Tree-sitter queries live next to each parser (`go.go`, `javascript.go`, etc.).

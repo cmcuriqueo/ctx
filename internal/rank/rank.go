@@ -4,43 +4,51 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/matias/ctx/internal/config"
+	"github.com/matias/ctx/internal/graph"
 	"github.com/matias/ctx/pkg/models"
 )
 
-// Scorer assigns relevance scores to files based on heuristics.
-type Scorer struct{}
+// Scorer assigns relevance scores to files based on heuristics and graph data.
+type Scorer struct {
+	cfg *config.Config
+}
 
-// NewScorer returns a new path-based scorer.
-func NewScorer() *Scorer {
-	return &Scorer{}
+// NewScorer returns a scorer using the given config.
+func NewScorer(cfg *config.Config) *Scorer {
+	return &Scorer{cfg: cfg}
 }
 
 // Score returns a heuristic relevance score for a file.
-func (s *Scorer) Score(f models.FileInfo) int {
+func (s *Scorer) Score(f models.FileInfo, g *graph.Graph) int {
+	c := s.cfg.Rank
 	score := 0
 	name := strings.ToLower(filepath.Base(f.Path))
 	rel := strings.ToLower(filepath.ToSlash(f.Path))
 
 	if isEntrypoint(name) {
-		score += 30
+		score += c.Entrypoint
 	}
 	if strings.HasPrefix(name, "readme.") {
-		score += 20
+		score += c.Readme
 	}
 	if isConfig(name, rel) {
-		score += 20
+		score += c.ConfigFile
 	}
 	if strings.Contains(name, "_test.") || strings.Contains(name, ".test.") {
-		score += 10
+		score += c.Test
 	}
 	if isGenerated(name, rel) {
-		score -= 40
+		score += c.Generated
 	}
 	if isVendor(rel) {
-		score -= 30
+		score += c.Vendor
+	}
+	if g != nil {
+		score += g.ImportedByCount(f.Path) * c.ImportedBonus
 	}
 	if f.Size > 100_000 && score <= 0 {
-		score -= 20
+		score += c.LargeIsolated
 	}
 	return score
 }
@@ -62,7 +70,7 @@ func isConfig(name, rel string) bool {
 		"yarn.lock", "pnpm-lock.yaml", "cargo.toml", "cargo.lock",
 		"pyproject.toml", "requirements.txt", "poetry.lock",
 		"dockerfile", "docker-compose.yml", "docker-compose.yaml",
-		"makefile", "cmakeLists.txt", ".github":
+		"makefile", "cmakelists.txt", ".github":
 		return true
 	}
 	return strings.HasPrefix(rel, ".github/")

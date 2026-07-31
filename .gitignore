@@ -6,5 +6,8 @@ ctx
 # Cache
 .cache/
 
+# Local tooling
+.tools/
+
 # Logs
 *.log

@@ -3,11 +3,12 @@ package rank
 import (
 	"testing"
 
+	"github.com/matias/ctx/internal/config"
 	"github.com/matias/ctx/pkg/models"
 )
 
 func TestScorer(t *testing.T) {
-	scorer := NewScorer()
+	scorer := NewScorer(config.Default())
 
 	cases := []struct {
 		file models.FileInfo
@@ -23,7 +24,7 @@ func TestScorer(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got := scorer.Score(c.file)
+		got := scorer.Score(c.file, nil)
 		if got < c.min || got > c.max {
 			t.Errorf("Score(%q) = %d, want between %d and %d", c.file.Path, got, c.min, c.max)
 		}

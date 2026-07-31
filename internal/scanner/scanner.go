@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/matias/ctx/internal/ignore"
+	"github.com/matias/ctx/internal/parser"
 	"github.com/matias/ctx/pkg/models"
 )
 
@@ -113,6 +114,15 @@ func (s *Scanner) fileInfo(root, rel string, info os.FileInfo) (models.FileInfo,
 	fi.Lines = lines
 	h := sha256.Sum256(content)
 	fi.SHA256 = hex.EncodeToString(h[:])
+
+	if p := parser.ForLanguage(fi.Language); p != nil {
+		meta, err := p.Parse(content)
+		if err == nil {
+			fi.Package = meta.Package
+			fi.Imports = meta.Imports
+			fi.Exports = meta.Exports
+		}
+	}
 	return fi, nil
 }
 

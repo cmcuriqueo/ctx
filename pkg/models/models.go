@@ -11,6 +11,9 @@ type FileInfo struct {
 	SHA256     string    `json:"sha256"`
 	ModifiedAt time.Time `json:"modified_at"`
 	IsBinary   bool      `json:"is_binary"`
+	Package    string    `json:"package,omitempty"`
+	Imports    []string  `json:"imports,omitempty"`
+	Exports    []string  `json:"exports,omitempty"`
 }
 
 // Manifest is the result of scanning a repository.
