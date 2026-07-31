@@ -1,0 +1,10 @@
+# Binaries
+ctx.exe
+ctx
+*.exe
+
+# Cache
+.cache/
+
+# Logs
+*.log

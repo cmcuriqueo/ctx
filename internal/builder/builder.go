@@ -1,0 +1,98 @@
+package builder
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+
+	"github.com/matias/ctx/internal/rank"
+	"github.com/matias/ctx/internal/tokens"
+	"github.com/matias/ctx/pkg/models"
+)
+
+// Builder selects files and generates context.md.
+type Builder struct {
+	estimator tokens.Estimator
+	scorer    *rank.Scorer
+}
+
+// New creates a builder with the given estimator and scorer.
+func New(estimator tokens.Estimator, scorer *rank.Scorer) *Builder {
+	return &Builder{estimator: estimator, scorer: scorer}
+}
+
+// Build generates the context file for the given manifest and budget.
+func (b *Builder) Build(manifest *models.Manifest, budget int, output string) error {
+	var ranked []models.RankedFile
+	for _, f := range manifest.Files {
+		if f.IsBinary {
+			continue
+		}
+		fullPath := filepath.Join(manifest.Root, f.Path)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		tok := b.estimator.Estimate(string(content))
+		score := b.scorer.Score(f)
+		ranked = append(ranked, models.RankedFile{
+			FileInfo:   f,
+			Score:      score,
+			Tokens:     tok,
+			Efficiency: float64(score) / float64(max(tok, 1)),
+		})
+	}
+
+	sort.Slice(ranked, func(i, j int) bool {
+		return ranked[i].Efficiency > ranked[j].Efficiency
+	})
+
+	selected := []models.RankedFile{}
+	used := 0
+	for _, rf := range ranked {
+		if rf.Tokens == 0 {
+			continue
+		}
+		if used+rf.Tokens > budget {
+			continue
+		}
+		selected = append(selected, rf)
+		used += rf.Tokens
+	}
+
+	var sb strings.Builder
+	sb.WriteString("# Context\n\n")
+	sb.WriteString(fmt.Sprintf("Project root: `%s`\n\n", manifest.Root))
+	sb.WriteString(fmt.Sprintf("Files scanned: %d\n\n", len(manifest.Files)))
+	sb.WriteString(fmt.Sprintf("Budget: %d tokens\n\n", budget))
+	sb.WriteString(fmt.Sprintf("Used: %d tokens (%.1f%%)\n\n", used, float64(used)*100/float64(max(budget, 1))))
+
+	sb.WriteString("## Included files\n\n")
+	for _, rf := range selected {
+		sb.WriteString(fmt.Sprintf("- `%s` (%s, %d tokens, score %d)\n", rf.Path, rf.Language, rf.Tokens, rf.Score))
+	}
+
+	sb.WriteString("\n## Snippets\n\n")
+	for _, rf := range selected {
+		fullPath := filepath.Join(manifest.Root, rf.Path)
+		content, err := os.ReadFile(fullPath)
+		if err != nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("### `%s`\n\n```%s\n%s\n```\n\n", rf.Path, rf.Language, string(content)))
+	}
+
+	if err := os.MkdirAll(filepath.Dir(output), 0755); err != nil {
+		return err
+	}
+	return os.WriteFile(output, []byte(sb.String()), 0644)
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
