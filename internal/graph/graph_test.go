@@ -1,6 +1,7 @@
 package graph
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/matias/ctx/pkg/models"
@@ -9,14 +10,18 @@ import (
 type staticResolver struct{}
 
 func (r *staticResolver) Resolve(importerPath, importPath string) string {
-	return importPath
+	importPath = strings.Trim(importPath, `"'`)
+	if !strings.HasPrefix(importPath, ".") {
+		return ""
+	}
+	return strings.TrimPrefix(importPath, "./")
 }
 
 func TestGraphBFS(t *testing.T) {
 	manifest := &models.Manifest{
 		Files: []models.FileInfo{
-			{Path: "main.go", Imports: []string{"helper.go"}},
-			{Path: "helper.go", Imports: []string{"util.go"}},
+			{Path: "main.go", Imports: []string{"./helper.go"}},
+			{Path: "helper.go", Imports: []string{"./util.go"}},
 			{Path: "util.go"},
 			{Path: "other.go"},
 		},
@@ -31,8 +36,8 @@ func TestGraphBFS(t *testing.T) {
 func TestGraphImportedByCount(t *testing.T) {
 	manifest := &models.Manifest{
 		Files: []models.FileInfo{
-			{Path: "main.go", Imports: []string{"helper.go"}},
-			{Path: "a.go", Imports: []string{"helper.go"}},
+			{Path: "main.go", Imports: []string{"./helper.go"}},
+			{Path: "a.go", Imports: []string{"./helper.go"}},
 			{Path: "helper.go"},
 		},
 	}
@@ -45,8 +50,8 @@ func TestGraphImportedByCount(t *testing.T) {
 func TestGraphCycles(t *testing.T) {
 	manifest := &models.Manifest{
 		Files: []models.FileInfo{
-			{Path: "a.go", Imports: []string{"b.go"}},
-			{Path: "b.go", Imports: []string{"a.go"}},
+			{Path: "a.go", Imports: []string{"./b.go"}},
+			{Path: "b.go", Imports: []string{"./a.go"}},
 		},
 	}
 	g := New(manifest, &staticResolver{})
@@ -59,8 +64,8 @@ func TestGraphCycles(t *testing.T) {
 func TestGraphTopologicalSort(t *testing.T) {
 	manifest := &models.Manifest{
 		Files: []models.FileInfo{
-			{Path: "main.go", Imports: []string{"helper.go"}},
-			{Path: "helper.go", Imports: []string{"util.go"}},
+			{Path: "main.go", Imports: []string{"./helper.go"}},
+			{Path: "helper.go", Imports: []string{"./util.go"}},
 			{Path: "util.go"},
 		},
 	}

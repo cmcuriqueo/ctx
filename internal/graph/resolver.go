@@ -28,48 +28,34 @@ func (r *SimpleResolver) exists(p string) bool {
 }
 
 // Resolve maps an import string to a file path in the manifest.
+// Only relative imports (./foo, ../foo) are resolved to avoid false positives
+// with external packages.
 func (r *SimpleResolver) Resolve(importerPath, importPath string) string {
 	importPath = strings.Trim(importPath, `"'`)
 	if importPath == "" {
 		return ""
 	}
 
-	// Relative imports: ./foo or ../foo
-	if strings.HasPrefix(importPath, ".") {
-		dir := path.Dir(importerPath)
-		candidate := path.Join(dir, importPath)
-		candidate = path.Clean(candidate)
-		if r.exists(candidate) {
-			return candidate
-		}
-		for _, ext := range []string{".go", ".js", ".jsx", ".ts", ".tsx", ".py", ".rs", ".java"} {
-			if r.exists(candidate + ext) {
-				return candidate + ext
-			}
-		}
-		// index files
-		for _, idx := range []string{"index.js", "index.ts", "index.tsx", "index.jsx", "__init__.py"} {
-			if r.exists(path.Join(candidate, idx)) {
-				return path.Join(candidate, idx)
-			}
-		}
+	// Only resolve relative imports.
+	if !strings.HasPrefix(importPath, ".") {
 		return ""
 	}
 
-	// Python relative: from . import foo
-	if strings.HasPrefix(importPath, ".") {
-		return ""
+	dir := path.Dir(importerPath)
+	candidate := path.Join(dir, importPath)
+	candidate = path.Clean(candidate)
+	if r.exists(candidate) {
+		return candidate
 	}
-
-	// Non-relative imports: try matching by final segment or package name.
-	segments := strings.Split(importPath, "/")
-	name := segments[len(segments)-1]
-	for file := range r.files {
-		base := path.Base(file)
-		ext := path.Ext(base)
-		baseNoExt := strings.TrimSuffix(base, ext)
-		if baseNoExt == name {
-			return file
+	for _, ext := range []string{".go", ".js", ".jsx", ".ts", ".tsx", ".py", ".rs", ".java"} {
+		if r.exists(candidate + ext) {
+			return candidate + ext
+		}
+	}
+	// index files
+	for _, idx := range []string{"index.js", "index.ts", "index.tsx", "index.jsx", "__init__.py"} {
+		if r.exists(path.Join(candidate, idx)) {
+			return path.Join(candidate, idx)
 		}
 	}
 	return ""
